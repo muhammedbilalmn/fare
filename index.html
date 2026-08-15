@@ -255,7 +255,10 @@
     <div class="settings-sub">Your community names (shown as the routing suggestion — edit to match your real group names)</div>
     <div class="settings-grid" id="communityGrid"></div>
 
-    <div class="settings-hint">Saved automatically on this device — no need to re-enter each day. Country is guessed from the departure city on the first line (works with Malayalam or English city names, or airport codes like RUH / DXB / DOH).</div>
+    <div class="settings-sub">Group invite links (pasted in below the "join the group" line, when the message has one)</div>
+    <div class="settings-grid" id="linksGrid"></div>
+
+    <div class="settings-hint">Saved automatically on this device — no need to re-enter each day. Country is guessed from the departure city on the first line (works with Malayalam or English city names, or airport codes like RUH / DXB / DOH). If the message already contains a link (e.g. chat.whatsapp.com), nothing is inserted — this only fills in the gap when the source message left the link out.</div>
   </div>
 
   <div class="boarding-pass">
@@ -290,7 +293,8 @@
   const DEFAULT_SETTINGS = {
     brandLine: 'FOLYX ✈️ TICKETS',
     phone: '+91 8921136841',
-    communities: Object.fromEntries(COUNTRIES.map(c => [c.key, c.label]))
+    communities: Object.fromEntries(COUNTRIES.map(c => [c.key, c.label])),
+    links: Object.fromEntries(COUNTRIES.map(c => [c.key, '']))
   };
 
   let settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -302,6 +306,7 @@
   const brandInput = $('brandInput');
   const phoneInput = $('phoneInput');
   const communityGrid = $('communityGrid');
+  const linksGrid = $('linksGrid');
   const rawInput = $('rawInput');
   const output = $('output');
   const originBadge = $('originBadge');
@@ -310,6 +315,7 @@
 
   function buildCommunityFields(){
     communityGrid.innerHTML = '';
+    linksGrid.innerHTML = '';
     COUNTRIES.forEach(c => {
       const wrap = document.createElement('div');
       wrap.className = 'field';
@@ -318,6 +324,17 @@
       communityGrid.appendChild(wrap);
       wrap.querySelector('input').addEventListener('input', e => {
         settings.communities[c.key] = e.target.value;
+        queueSave();
+        process();
+      });
+
+      const linkWrap = document.createElement('div');
+      linkWrap.className = 'field';
+      linkWrap.innerHTML = `<label for="link_${c.key}">${c.label} invite link</label>
+        <input id="link_${c.key}" type="text" placeholder="https://chat.whatsapp.com/..." value="${settings.links[c.key] || ''}" />`;
+      linksGrid.appendChild(linkWrap);
+      linkWrap.querySelector('input').addEventListener('input', e => {
+        settings.links[c.key] = e.target.value;
         queueSave();
         process();
       });
@@ -340,6 +357,7 @@
         const loaded = JSON.parse(res.value);
         settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
         settings.communities = Object.assign({}, DEFAULT_SETTINGS.communities, loaded.communities || {});
+        settings.links = Object.assign({}, DEFAULT_SETTINGS.links, loaded.links || {});
       }
     }catch(e){
       // no saved settings yet — use defaults
@@ -381,6 +399,23 @@
     return { text, replacedBrandLine };
   }
 
+  function insertGroupLink(text, country){
+    if(!country) return text;
+    const link = (settings.links[country.key] || '').trim();
+    if(!link) return text;
+    // If a real link is already present in the message, don't add a duplicate
+    if(/https?:\/\/\S+/i.test(text)) return text;
+
+    const lines = text.split('\n');
+    const idx = lines.findIndex(l =>
+      l.includes('ലിങ്ക്') && (l.includes('ഗ്രൂപ്പ') || l.includes('ജോയി'))
+    );
+    if(idx === -1) return text;
+
+    lines.splice(idx + 1, 0, link);
+    return lines.join('\n');
+  }
+
   function process(){
     const raw = rawInput.value;
     if(!raw.trim()){
@@ -390,10 +425,11 @@
       return;
     }
     const result = rebrand(raw);
-    output.value = result.text;
-    charCount.textContent = result.text.length + ' characters';
-
     const country = detectCountry(raw);
+    const finalText = insertGroupLink(result.text, country);
+    output.value = finalText;
+    charCount.textContent = finalText.length + ' characters';
+
     if(country){
       originBadge.textContent = '📍 ' + (settings.communities[country.key] || country.label);
       originBadge.classList.remove('hidden', 'none');
