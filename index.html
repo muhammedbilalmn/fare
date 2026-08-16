@@ -98,6 +98,28 @@
     background: var(--paper-dim);
   }
   .field input:focus{ outline: 2px solid var(--steel); outline-offset: 1px; background: white;}
+  .row-with-buttons{ display:flex; gap:6px; }
+  .row-with-buttons input{ flex:1; min-width:0; }
+  .mini-btn{
+    flex-shrink:0;
+    border: 1px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 8px;
+    padding: 0 12px;
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:600;
+    font-size: 12.5px;
+    cursor:pointer;
+    transition: background .15s ease, opacity .15s ease;
+  }
+  .mini-btn:hover{ background: var(--steel); border-color: var(--steel); }
+  .mini-btn.saved{ background:#2e7d4f; border-color:#2e7d4f; }
+  .mini-btn.ghost{ background: transparent; color: var(--steel); border-color: var(--steel); }
+  .mini-btn.ghost:hover{ background: var(--steel); color: var(--paper); }
+  .mini-btn:disabled{ opacity:.4; cursor:not-allowed; }
+  .mini-btn:disabled:hover{ background: var(--ink); border-color: var(--ink); }
+  .mini-btn.ghost:disabled:hover{ background:transparent; color:var(--steel); }
   .settings-sub{
     font-family:'Space Grotesk', sans-serif;
     font-size: 13px;
@@ -240,15 +262,22 @@
   </header>
 
   <div class="settings-panel hidden" id="settingsPanel">
-    <div class="settings-sub">Your details</div>
+    <div class="settings-sub">Brand line</div>
     <div class="settings-grid">
-      <div class="field">
-        <label for="brandInput">Brand line (replaces the old agency's name + "TICKETS" line)</label>
+      <div class="field full">
+        <label for="brandInput">Replaces the old agency's name + "TICKETS" line</label>
         <input id="brandInput" type="text" value="FOLYX ✈️ TICKETS" />
       </div>
-      <div class="field">
-        <label for="phoneInput">Your phone number (replaces every phone number found)</label>
-        <input id="phoneInput" type="text" value="+91 8921136841" />
+    </div>
+
+    <div class="settings-sub">Your phone number</div>
+    <div class="settings-grid">
+      <div class="field full">
+        <label for="phoneInput">Replaces every phone number found in the message</label>
+        <div class="row-with-buttons">
+          <input id="phoneInput" type="text" value="+91 8921136841" />
+          <button class="mini-btn" id="savePhoneBtn">Save</button>
+        </div>
       </div>
     </div>
 
@@ -258,7 +287,7 @@
     <div class="settings-sub">Group invite links (pasted in below the "join the group" line, when the message has one)</div>
     <div class="settings-grid" id="linksGrid"></div>
 
-    <div class="settings-hint">Saved automatically on this device — no need to re-enter each day. Country is guessed from the departure city on the first line (works with Malayalam or English city names, or airport codes like RUH / DXB / DOH). If the message already contains a link (e.g. chat.whatsapp.com), nothing is inserted — this only fills in the gap when the source message left the link out.</div>
+    <div class="settings-hint">Saved automatically on this device as you type — the Save buttons just confirm it and give you a checkmark. Use "Open ↗" to quickly test a link actually works before it goes out. Country is guessed from the departure city on the first line (works with Malayalam or English city names, or airport codes like RUH / DXB / DOH). If the message already contains a link, nothing is inserted — this only fills the gap when the source message left it out.</div>
   </div>
 
   <div class="boarding-pass">
@@ -329,25 +358,58 @@
       });
 
       const linkWrap = document.createElement('div');
-      linkWrap.className = 'field';
+      linkWrap.className = 'field full';
       linkWrap.innerHTML = `<label for="link_${c.key}">${c.label} invite link</label>
-        <input id="link_${c.key}" type="text" placeholder="https://chat.whatsapp.com/..." value="${settings.links[c.key] || ''}" />`;
+        <div class="row-with-buttons">
+          <input id="link_${c.key}" type="text" placeholder="https://chat.whatsapp.com/..." value="${settings.links[c.key] || ''}" />
+          <button class="mini-btn save-link-btn" type="button" data-key="${c.key}">Save</button>
+          <button class="mini-btn ghost open-link-btn" type="button" data-key="${c.key}" ${!settings.links[c.key] ? 'disabled' : ''}>Open ↗</button>
+        </div>`;
       linksGrid.appendChild(linkWrap);
-      linkWrap.querySelector('input').addEventListener('input', e => {
+
+      const linkInput = linkWrap.querySelector('input');
+      const openBtn = linkWrap.querySelector('.open-link-btn');
+      const saveBtn = linkWrap.querySelector('.save-link-btn');
+
+      linkInput.addEventListener('input', e => {
         settings.links[c.key] = e.target.value;
+        openBtn.disabled = !e.target.value.trim();
         queueSave();
         process();
+      });
+
+      saveBtn.addEventListener('click', () => {
+        settings.links[c.key] = linkInput.value;
+        flushSave();
+        flashSaved(saveBtn);
+        process();
+      });
+
+      openBtn.addEventListener('click', () => {
+        const url = linkInput.value.trim();
+        if(!url) return;
+        window.open(url, '_blank', 'noopener');
       });
     });
   }
 
   function queueSave(){
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      try{
-        await window.storage.set('settings', JSON.stringify(settings), false);
-      }catch(e){ console.error('Save failed', e); }
-    }, 350);
+    saveTimer = setTimeout(flushSave, 350);
+  }
+
+  async function flushSave(){
+    clearTimeout(saveTimer);
+    try{
+      await window.storage.set('settings', JSON.stringify(settings), false);
+    }catch(e){ console.error('Save failed', e); }
+  }
+
+  function flashSaved(btn){
+    const original = btn.textContent;
+    btn.textContent = 'Saved ✓';
+    btn.classList.add('saved');
+    setTimeout(() => { btn.textContent = original; btn.classList.remove('saved'); }, 1200);
   }
 
   async function loadSettings(){
@@ -403,7 +465,6 @@
     if(!country) return text;
     const link = (settings.links[country.key] || '').trim();
     if(!link) return text;
-    // If a real link is already present in the message, don't add a duplicate
     if(/https?:\/\/\S+/i.test(text)) return text;
 
     const lines = text.split('\n');
@@ -416,6 +477,151 @@
     return lines.join('\n');
   }
 
+  function stripLead(line){
+    // Strip leading emoji/symbols, keep letters (any script) and digits
+    return line.replace(/^[^\p{L}\p{N}]+/u, '').trim();
+  }
+
+  const ARROWS = ['▶️','➤','➔','➡️','➡','→','->'];
+  const AIRLINE_WORD = /\b(AIR(WAYS|LINES)?|EXPRESS)\b/i;
+  const MALAYALAM_RANGE = /[\u0D00-\u0D7F]/;
+  const FARE_LINE = /^([A-Za-z]{3}\.?\s?\d{1,2})\s*:\s*([\d,]+)/;
+  const DATE_LINE = /\d{1,2}\s*[-\/]\s*[A-Za-z]{3,9}\s*[-\/]\s*\d{2,4}/;
+
+  function parseMessage(text){
+    const rawLines = text.split('\n');
+    const parsed = {
+      origin:null, destination:null, dateText:null, airlineText:null,
+      luggageText:null, fares:[], notes:[], extra:[], joinLine:null, contactLine:null
+    };
+
+    for(const rawLine of rawLines){
+      const line = rawLine.trim();
+      if(!line) continue;
+
+      // separators like ➖➖➖➖ or ---- or ____
+      if(/^[➖\-_=~•.]{4,}$/.test(line)) continue;
+
+      const hasArrow = ARROWS.some(a => line.includes(a));
+      if(hasArrow && !parsed.origin){
+        const arrow = ARROWS.find(a => line.includes(a));
+        const [left, right] = line.split(arrow);
+        if(left && right){
+          parsed.origin = stripLead(left);
+          parsed.destination = stripLead(right);
+          continue;
+        }
+      }
+
+      if(!parsed.dateText && DATE_LINE.test(line) && !FARE_LINE.test(stripLead(line))){
+        parsed.dateText = stripLead(line);
+        continue;
+      }
+
+      if(!parsed.luggageText && /luggage/i.test(line) && line.length <= 30){
+        parsed.luggageText = stripLead(line).replace(/luggage/i, '').trim();
+        continue;
+      }
+
+      const faretest = FARE_LINE.exec(stripLead(line));
+      if(faretest){
+        parsed.fares.push({ label: faretest[1].toUpperCase(), value: faretest[2] });
+        continue;
+      }
+
+      if(!parsed.airlineText && !MALAYALAM_RANGE.test(line) && AIRLINE_WORD.test(line)
+         && !/TICKETS/i.test(line) && !/luggage/i.test(line) && line.length <= 40){
+        parsed.airlineText = stripLead(line);
+        continue;
+      }
+
+      if(!parsed.joinLine && line.includes('ലിങ്ക്') && (line.includes('ഗ്രൂപ്പ') || line.includes('ജോയി'))){
+        parsed.joinLine = line;
+        continue;
+      }
+      if(!parsed.joinLine && /join/i.test(line) && /link/i.test(line) && /group/i.test(line)){
+        parsed.joinLine = line;
+        continue;
+      }
+
+      const phoneTest = /(\+?\d{1,3}[\s-]?)?\d{10}\b/.test(line);
+      if(phoneTest){
+        if(!parsed.contactLine) parsed.contactLine = line;
+        continue;
+      }
+
+      if(/^[❗️⚠️❕❔‼️]/.test(line)){
+        parsed.notes.push(stripLead(line));
+        continue;
+      }
+
+      if(/^TICKETS\b/i.test(line) || /\bTICKETS\b/i.test(line)){
+        // agency name line — not needed, brand line covers this in the template
+        continue;
+      }
+
+      parsed.extra.push(line);
+    }
+
+    return parsed;
+  }
+
+  function buildStructuredOutput(parsed, country, link){
+    const lines = [];
+
+    if(parsed.origin && parsed.destination){
+      lines.push(`✈️ ${parsed.origin} ➜ ${parsed.destination}`);
+    }
+    if(parsed.dateText) lines.push(`🗓️ ${parsed.dateText}`);
+    if(parsed.airlineText) lines.push(`🛫 ${parsed.airlineText}`);
+    if(parsed.luggageText) lines.push(`🧳 Baggage: ${parsed.luggageText}`);
+
+    if(parsed.fares.length){
+      lines.push('━━━━━━━━━━━━━━━');
+      parsed.fares.forEach(f => lines.push(`📅 ${f.label}: ${f.value}`));
+    }
+
+    if(parsed.notes.length || parsed.extra.length){
+      lines.push('━━━━━━━━━━━━━━━');
+      parsed.notes.forEach(n => lines.push(`❗ ${n}`));
+      parsed.extra.forEach(e => lines.push(e));
+    }
+
+    lines.push('');
+    if(link && country){
+      const communityLabel = settings.communities[country.key] || country.label;
+      lines.push(`📲 Join the ${communityLabel} group:`);
+      lines.push(link);
+      lines.push('');
+    }
+
+    lines.push(`📞 Tickets & enquiries: ${settings.phone}`);
+    lines.push(settings.brandLine);
+
+    return lines.join('\n');
+  }
+
+  function buildOutput(raw, country){
+    // Step 1: normalize phone + brand line across the raw text first
+    const { text: normalized } = rebrand(raw);
+    const alreadyHasLink = /https?:\/\/\S+/i.test(normalized);
+
+    // Step 2: try structured parsing
+    const parsed = parseMessage(normalized);
+    const parseSucceeded = Boolean(parsed.origin || (parsed.airlineText && parsed.fares.length));
+
+    if(parseSucceeded){
+      const link = (parsed.joinLine && !alreadyHasLink && country) ? (settings.links[country.key] || '').trim() : '';
+      return { text: buildStructuredOutput(parsed, country, link), structured:true };
+    }
+
+    // Fallback: keep the original layout, just swap details + insert the link
+    const withLink = insertGroupLink(normalized, country);
+    return { text: withLink, structured:false };
+  }
+
+
+
   function process(){
     const raw = rawInput.value;
     if(!raw.trim()){
@@ -424,11 +630,10 @@
       charCount.textContent = '';
       return;
     }
-    const result = rebrand(raw);
     const country = detectCountry(raw);
-    const finalText = insertGroupLink(result.text, country);
-    output.value = finalText;
-    charCount.textContent = finalText.length + ' characters';
+    const result = buildOutput(raw, country);
+    output.value = result.text;
+    charCount.textContent = result.text.length + ' characters' + (result.structured ? '' : ' · original layout kept');
 
     if(country){
       originBadge.textContent = '📍 ' + (settings.communities[country.key] || country.label);
@@ -443,6 +648,12 @@
   gearBtn.addEventListener('click', () => panel.classList.toggle('hidden'));
   brandInput.addEventListener('input', e => { settings.brandLine = e.target.value; queueSave(); process(); });
   phoneInput.addEventListener('input', e => { settings.phone = e.target.value; queueSave(); process(); });
+  $('savePhoneBtn').addEventListener('click', () => {
+    settings.phone = phoneInput.value;
+    flushSave();
+    flashSaved($('savePhoneBtn'));
+    process();
+  });
   rawInput.addEventListener('input', process);
   output.addEventListener('input', () => {
     charCount.textContent = output.value.length + ' characters';
