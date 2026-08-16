@@ -72,6 +72,17 @@
     box-shadow: 0 2px 0 var(--line);
   }
   .settings-panel.hidden{ display:none; }
+  .storage-warning{
+    background: #FBEAEA;
+    border: 1px solid var(--stamp-red);
+    color: #7A2626;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+  .storage-warning.hidden{ display:none; }
   .settings-grid{
     display:grid;
     grid-template-columns: 1fr 1fr;
@@ -115,6 +126,7 @@
   }
   .mini-btn:hover{ background: var(--steel); border-color: var(--steel); }
   .mini-btn.saved{ background:#2e7d4f; border-color:#2e7d4f; }
+  .mini-btn.failed{ background: var(--stamp-red); border-color: var(--stamp-red); }
   .mini-btn.ghost{ background: transparent; color: var(--steel); border-color: var(--steel); }
   .mini-btn.ghost:hover{ background: var(--steel); color: var(--paper); }
   .mini-btn:disabled{ opacity:.4; cursor:not-allowed; }
@@ -262,6 +274,8 @@
   </header>
 
   <div class="settings-panel hidden" id="settingsPanel">
+    <div class="storage-warning hidden" id="storageWarning">⚠️ Saved settings aren't available in this view, so nothing will persist after a refresh. Open this file from Claude's artifact preview (not a downloaded copy opened in a plain browser tab) for your links, phone number, and names to be remembered.</div>
+
     <div class="settings-sub">Brand line</div>
     <div class="settings-grid">
       <div class="field full">
@@ -378,10 +392,13 @@
         process();
       });
 
-      saveBtn.addEventListener('click', () => {
+      saveBtn.addEventListener('click', async () => {
         settings.links[c.key] = linkInput.value;
-        flushSave();
-        flashSaved(saveBtn);
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+        const ok = await flushSave();
+        saveBtn.disabled = false;
+        if(ok) flashSaved(saveBtn); else flashFailed(saveBtn);
         process();
       });
 
@@ -393,6 +410,8 @@
     });
   }
 
+  const storageAvailable = typeof window.storage !== 'undefined' && typeof window.storage.set === 'function';
+
   function queueSave(){
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushSave, 350);
@@ -400,29 +419,49 @@
 
   async function flushSave(){
     clearTimeout(saveTimer);
+    if(!storageAvailable) return false;
     try{
       await window.storage.set('settings', JSON.stringify(settings), false);
-    }catch(e){ console.error('Save failed', e); }
+      return true;
+    }catch(e){
+      console.error('Save failed', e);
+      return false;
+    }
   }
 
   function flashSaved(btn){
-    const original = btn.textContent;
+    const original = btn.dataset.label || btn.textContent;
+    btn.dataset.label = original;
     btn.textContent = 'Saved ✓';
+    btn.classList.remove('failed');
     btn.classList.add('saved');
     setTimeout(() => { btn.textContent = original; btn.classList.remove('saved'); }, 1200);
   }
 
+  function flashFailed(btn){
+    const original = btn.dataset.label || btn.textContent;
+    btn.dataset.label = original;
+    btn.textContent = 'Failed — retry';
+    btn.classList.remove('saved');
+    btn.classList.add('failed');
+    setTimeout(() => { btn.textContent = original; btn.classList.remove('failed'); }, 2000);
+  }
+
   async function loadSettings(){
-    try{
-      const res = await window.storage.get('settings', false);
-      if(res && res.value){
-        const loaded = JSON.parse(res.value);
-        settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
-        settings.communities = Object.assign({}, DEFAULT_SETTINGS.communities, loaded.communities || {});
-        settings.links = Object.assign({}, DEFAULT_SETTINGS.links, loaded.links || {});
+    if(storageAvailable){
+      try{
+        const res = await window.storage.get('settings', false);
+        if(res && res.value){
+          const loaded = JSON.parse(res.value);
+          settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+          settings.communities = Object.assign({}, DEFAULT_SETTINGS.communities, loaded.communities || {});
+          settings.links = Object.assign({}, DEFAULT_SETTINGS.links, loaded.links || {});
+        }
+      }catch(e){
+        // no saved settings yet — use defaults
       }
-    }catch(e){
-      // no saved settings yet — use defaults
+    } else {
+      $('storageWarning').classList.remove('hidden');
     }
     brandInput.value = settings.brandLine;
     phoneInput.value = settings.phone;
@@ -648,10 +687,14 @@
   gearBtn.addEventListener('click', () => panel.classList.toggle('hidden'));
   brandInput.addEventListener('input', e => { settings.brandLine = e.target.value; queueSave(); process(); });
   phoneInput.addEventListener('input', e => { settings.phone = e.target.value; queueSave(); process(); });
-  $('savePhoneBtn').addEventListener('click', () => {
+  $('savePhoneBtn').addEventListener('click', async () => {
+    const btn = $('savePhoneBtn');
     settings.phone = phoneInput.value;
-    flushSave();
-    flashSaved($('savePhoneBtn'));
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    const ok = await flushSave();
+    btn.disabled = false;
+    if(ok) flashSaved(btn); else flashFailed(btn);
     process();
   });
   rawInput.addEventListener('input', process);
